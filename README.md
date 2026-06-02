@@ -1,98 +1,114 @@
 # xdp-features
 
-`xdp-features` is a Linux command-line tool for checking which XDP-related
-capabilities a network interface reports through the kernel `netdev` generic
-netlink family.
+`xdp-features` is a Linux command-line tool for inspecting and checking
+XDP/AF_XDP readiness on network interfaces.
 
-It queries the selected interface and prints whether each requested capability
-is available. The exit status is intended for shell scripts and CI checks.
+It has two subcommands:
+
+- `info` prints a human-readable report.
+- `check` is quiet and intended for scripts.
 
 ## Usage
 
 ```text
-xdp-features [OPTIONS] [COMMAND]
+xdp-features <COMMAND>
 ```
 
-Options:
+### Human Report
+
+Inspect every interface:
+
+```sh
+target/debug/xdp-features info
+```
+
+Inspect one interface:
+
+```sh
+target/debug/xdp-features info --interface eth0
+target/debug/xdp-features info -i eth0 --verbose
+```
+
+Without `--interface`, `info` prints a compact summary for every interface,
+grouped as physical interfaces and virtual/logical interfaces. With
+`--interface`, it prints a detailed report for that interface.
+
+Default output shows NIC identity when available and status lines for XDP,
+zero-copy, and TX ring size. Verbose mode also prints raw kernel netlink values,
+all known feature flags, PCI details, and RX ring size as informational output.
+
+Example summary:
 
 ```text
--i, --interface <IFNAME>  Network interface to inspect
--v, --verbose...          Increase diagnostic verbosity
--h, --help                Print help
--V, --version             Print version
+Physical interfaces:
+enp5s0f0: ✅ XDP, ✅ zero-copy, ✅ TX ring 512, Intel Corporation Ethernet Controller X710 for 10GBASE-T [8086:15ff]
+
+Virtual/logical interfaces:
+lo: ❌ error: netlink response did not include NETDEV_A_DEV_XDP_FEATURES
 ```
 
-The interface option is required for queries:
-
-```sh
-target/debug/xdp-features --interface eth0
-```
-
-When no subcommand is provided, the tool prints every known capability.
-
-## Checking Specific Features
-
-Use the `features` subcommand to check only selected capabilities:
-
-```sh
-target/debug/xdp-features --interface eth0 features \
-  NETDEV_XDP_ACT_BASIC \
-  NETDEV_XDP_ACT_REDIRECT \
-  NETDEV_XDP_ACT_XSK_ZEROCOPY
-```
-
-`--interface` is global, so this is equivalent:
-
-```sh
-target/debug/xdp-features features NETDEV_XDP_ACT_BASIC --interface eth0
-```
-
-The `features` subcommand requires at least one feature name.
-
-## Output
-
-Default mode prints all known capabilities:
+Example detailed report:
 
 ```text
-NETDEV_XDP_ACT_BASIC: yes
-NETDEV_XDP_ACT_REDIRECT: yes
-NETDEV_XDP_ACT_NDO_XMIT: no
-NETDEV_XDP_ACT_XSK_ZEROCOPY: no
-NETDEV_XDP_ACT_HW_OFFLOAD: no
-NETDEV_XDP_ACT_RX_SG: yes
-NETDEV_XDP_ACT_NDO_XMIT_SG: no
-NETDEV_A_DEV_XDP_ZC_MAX_SEGS: 4
-NETDEV_XDP_RX_METADATA_TIMESTAMP: yes
-NETDEV_XDP_RX_METADATA_HASH: no
-NETDEV_XDP_RX_METADATA_VLAN_TAG: no
-NETDEV_XSK_FLAGS_TX_TIMESTAMP: no
-NETDEV_XSK_FLAGS_TX_CHECKSUM: yes
+Interface: enp5s0f0
+NIC: Intel Corporation Ethernet Controller X710 for 10GBASE-T [8086:15ff]
+Driver: i40e
+PCI slot: 0000:05:00.0
+
+✅ XDP: supported
+✅ Zero-copy: supported
+✅ TX ring: 512, ok
 ```
 
-With `--verbose`, the raw netlink values are also printed:
+NIC identity is best-effort. The tool reads PCI information from sysfs and uses
+`lspci` when available to resolve a human-readable model. If the model cannot be
+resolved, it falls back to PCI vendor/device IDs.
+
+### Script Check
+
+Check that an interface supports XDP and has a valid TX ring size. `check`
+always requires `-i` or `--interface`:
 
 ```sh
-target/debug/xdp-features --interface eth0 --verbose
+target/debug/xdp-features check --interface eth0
+```
+
+Also require AF_XDP zero-copy support:
+
+```sh
+target/debug/xdp-features check -i eth0 --zero-copy
+```
+
+`check` prints nothing on success. On failure it writes only the failed
+requirement or runtime error to stderr and exits nonzero. Possible failure
+messages include:
+
+```text
+XDP not supported
+zero-copy not supported
+TX ring size is invalid: 511 (try: sudo ethtool -G eth0 tx 512)
+unable to query ring sizes: <error>
+error: <netlink or interface error>
 ```
 
 ## Exit Status
 
+`info`:
+
 ```text
-0  all selected capabilities are supported or present
-1  at least one selected capability is unsupported or missing
-2  query/runtime error
+0  inspected interface reports are ready
+1  inspected interface reports were queried but are not ready
+2  runtime/query error
 ```
 
-Example shell check:
+`check`:
 
-```sh
-if target/debug/xdp-features --interface eth0 features NETDEV_XDP_ACT_BASIC; then
-  echo "supported"
-else
-  case $? in
-    1) echo "not supported" ;;
-    2) echo "query failed" ;;
-  esac
-fi
+```text
+0  all requested checks passed
+1  one or more checks failed, including runtime/query errors
 ```
 
+For `check`, the default checks are XDP support and valid TX ring size.
+`--zero-copy` additionally requires zero-copy support. A TX ring size of zero or
+a non-power-of-two TX ring size fails the check. Failure to query ring sizes also
+fails the check.
