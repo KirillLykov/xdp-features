@@ -16,6 +16,12 @@ xdp-features <COMMAND>
 
 ### Human Report
 
+
+
+https://github.com/user-attachments/assets/49d5530d-3f18-4cf5-83bd-f759ec8f26f6
+
+
+
 Inspect every interface:
 
 ```sh
@@ -112,3 +118,8 @@ For `check`, the default checks are XDP support and valid TX ring size.
 `--zero-copy` additionally requires zero-copy support. A TX ring size of zero or
 a non-power-of-two TX ring size fails the check. Failure to query ring sizes also
 fails the check.
+
+### Acknowledgements
+
+Special thanks to Darius from [Cherry Servers](https://www.cherryservers.com/)
+for providing access to NICs used for testing and debugging.
